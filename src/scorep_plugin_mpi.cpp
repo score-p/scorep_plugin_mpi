@@ -5,15 +5,39 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#define ENV_VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION "SCOREP_PLUGIN_MPI_DECIMATION"
+#define VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION_DEFAULT 4
+
 scorep_plugin_mpi::scorep_plugin_mpi()
 {
-    printf("Loading Metric Plugin: MPI Sampling\n");
+    const char *decimation = getenv(ENV_VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION);
+
+    /* Get decimation set by user */
+    if (decimation == NULL) {
+        m_mpi_samples_decimation = VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION_DEFAULT;
+    }
+    else {
+        m_mpi_samples_decimation = atoi(decimation);
+        if ((m_mpi_samples_decimation & (m_mpi_samples_decimation-1)) != 0) {
+            printf("Warning: Samples decimation value must be a power of 2, "
+                "setting to default\n");
+        }
+    }
+
+    printf("Loading Metric Plugin: MPI Sampling (Samples decimation=%u)\n",
+        m_mpi_samples_decimation);
 
     m_mpi_t_initialized = 0;
+    m_mpi_decimation_counter = 0;
+    m_metrics_last_read_values = NULL;
+    m_decimation_duty_cycle = 0;
+
 }
 
 scorep_plugin_mpi::~scorep_plugin_mpi()
 {
+    free(m_metrics_last_read_values);
+    m_metrics_last_read_values = NULL;
 }
 
 
@@ -24,6 +48,8 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
     unsigned long long int hex_dummy;
     int assigned_event = 0;
     std::vector<MetricProperty> metric_properties;
+    uint32_t i;
+    uint32_t pvars_max_index;
 
     DEBUG_PRINT("scorep_plugin_mpi::get_metric_properties() called with: %s\n", metric_name);
 
@@ -40,8 +66,25 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
         /* Get static initialization of counters list */
         mpi_t_sampling_object.pvars_enumeration_get(&pvars, &m_num_pvars);
 #endif
-        std::cout << "MPI_T m_num_pvars=" << m_num_pvars << std::endl;
+        printf("MPI_T m_num_pvars = %zu\n", m_num_pvars);
+
+        /* Allocate metrics last values */
+        pvars_max_index = 0;
+        for (i = 0; i < m_num_pvars; i++) {
+            if (pvars[i].counter_index > pvars_max_index) {
+                pvars_max_index = pvars[i].counter_index;
+            }
+        }
+        /* Add 1 since the last index also requires an element */
+        pvars_max_index = pvars_max_index + 1;
+
+        /* Allocate memory */
+        m_metrics_last_read_values = (uint64_t *)malloc( sizeof(uint64_t) * pvars_max_index );
+
+        m_decimation_duty_cycle = 0;
+
         for (int i = 0; i < m_num_pvars; i++) {
+            m_metrics_last_read_values[i] = 0;
             metric_properties.push_back(
                 MetricProperty(metric_name + "_" + pvars[i].counter_name, "", "").absolute_point().value_uint().decimal());
         }
