@@ -62,12 +62,15 @@ template <typename Proxy>
 void
 scorep_plugin_mpi::get_current_value(int32_t id, Proxy& proxy)
 {
-    uint64_t val = 0;
-    int ret;
-    int flag;
-
     /* Enumerate PVARs */
-    if (0 == m_mpi_t_initialized) {
+    if (__builtin_expect(m_mpi_t_initialized, 1)) {
+        /* Record current MPI_T value */
+        proxy.write( (uint64_t)mpi_t_sampling_object.MPI_T_pvar_current_value_get(id) );
+        return;
+    }
+    else {
+      int ret;
+      int flag;
 
       ret = mpi_t_sampling_object.MPI_Initialized(&flag);
       if (flag) {
@@ -77,11 +80,8 @@ scorep_plugin_mpi::get_current_value(int32_t id, Proxy& proxy)
         m_mpi_t_initialized = 1;
       }
     }
-    else {
-      /* Record current MPI_T value */
-      val = (uint64_t)mpi_t_sampling_object.MPI_T_pvar_current_value_get(id);
-    }
 
+    uint64_t val = 0;
     proxy.write(val);
 }
 
