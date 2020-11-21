@@ -667,6 +667,7 @@ mpi_t_sampling::MPI_T_pvar_current_value_get(int32_t index)
    //	   "), pvar_handles[index]=" <<pvar_handles[index] << "\n";
    DEBUG_PRINT("MPI_T_pvar_current_value_get() - index=%d: pvar_handles[index]=%p\n",
 	   index, pvar_handles[index]);
+
    MPI_T_pvar_read(session, pvar_handles[index], read_value_buffer);
 
 #endif

@@ -6,21 +6,14 @@
 
 #include <stdint.h>
 
+#include "utils.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 #include <mpi.h> /* Adds MPI_T definitions as well */
 #ifdef __cplusplus
 }
-#endif
-
-/* Enable Debug prints */
-//#define MPI_T_DEBUG_ENABLE
-
-#if defined(MPI_T_DEBUG_ENABLE)
-#define DEBUG_PRINT printf
-#else
-#define DEBUG_PRINT
 #endif
 
 #define THRESHOLD 						0
@@ -32,7 +25,6 @@ extern "C" {
 
 #define NEG_INF							-10000000
 #define POS_INF							10000000
-
 
 /**********************************/
 /* Performance variable structure */

@@ -3,10 +3,11 @@
 #include <sstream>
 #include <utils.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 scorep_plugin_mpi::scorep_plugin_mpi()
 {
-    std::cout << "Loading Metric Plugin: MPI Sampling\n";
+    printf("Loading Metric Plugin: MPI Sampling\n");
 
     m_mpi_t_initialized = 0;
 }
@@ -24,13 +25,11 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
     int assigned_event = 0;
     std::vector<MetricProperty> metric_properties;
 
-    std::cout << "scorep_plugin_mpi::get_metric_properties() called with: " <<
-            metric_name << '\n';
+    DEBUG_PRINT("scorep_plugin_mpi::get_metric_properties() called with: %s\n", metric_name);
 
     auto [event, dummy] = parse_metric(metric_name, &hex_dummy);
 
-    std::cout << "Event = " << event << " dummy = " << dummy <<
-            " hex_dummy = " << hex_dummy << std::endl;
+    DEBUG_PRINT("Event=%s, dummy=%lu, hex_dummy=%lx\n", event, dummy, hex_dummy);
 
     /* MPI_T? */
     if (event == "MPI_T") {
@@ -54,7 +53,7 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
 
     /* Debug print */
     if (assigned_event) {
-        std::cout << event << " = " << (uintptr_t)hex_dummy << std::endl;
+        DEBUG_PRINT("%s = %lu\n", event, (uintptr_t)hex_dummy);
     }
 
     return metric_properties;
@@ -71,7 +70,7 @@ scorep_plugin_mpi::add_metric(const std::string& metric)
 
     auto [event, period] = parse_metric(metric, &hex_dummy);
 
-    std::cout << "add_metric() called with: " << metric << '\n';
+    DEBUG_PRINT("add_metric() called with: %s = %lu\n", event, (uintptr_t)hex_dummy);
 
     /* MPI_T? */
     if (event == "MPI_T") {
@@ -97,14 +96,14 @@ scorep_plugin_mpi::add_metric(const std::string& metric)
 void
 scorep_plugin_mpi::start()
 {
-    std::cout << "scorep_plugin_mpi::start()\n";
+    DEBUG_PRINT("scorep_plugin_mpi::start()\n");
 }
 
 
 void
 scorep_plugin_mpi::stop()
 {
-    std::cout << "scorep_plugin_mpi::stop()";
+    DEBUG_PRINT("scorep_plugin_mpi::stop()\n");
 }
 
 SCOREP_METRIC_PLUGIN_CLASS(scorep_plugin_mpi, "scorep_plugin_mpi")

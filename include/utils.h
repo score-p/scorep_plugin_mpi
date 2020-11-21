@@ -8,6 +8,15 @@
 #include <tuple>
 #include <vector>
 
+/* Enable Debug prints */
+//#define MPI_T_DEBUG_ENABLE
+
+#if defined(MPI_T_DEBUG_ENABLE)
+#define DEBUG_PRINT printf
+#else
+#define DEBUG_PRINT
+#endif
+
 std::string
 to_lower (const std::string& input_string);
 
@@ -20,10 +29,6 @@ parse_metric (const std::string& metric, unsigned long long int *hex_dummy);
 std::size_t
 read_buffer_size ();
 
-#if 0
-boost::filesystem::path
-create_trace_directory ();
-#endif
 std::size_t
 to_mb (std::size_t nbytes);
 
