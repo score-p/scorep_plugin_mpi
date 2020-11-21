@@ -29,7 +29,7 @@ target_include_directories(scorep_plugin_mpi PRIVATE
   include
   src/mpi_t_sampling)
 
-target_compile_options(scorep_plugin_mpi INTERFACE -Wall -pedantic -Wextra -fPIC)
+target_compile_options(scorep_plugin_mpi INTERFACE -Wall -pedantic -Wextra)
 
 target_link_libraries(scorep_plugin_mpi PRIVATE 
   Scorep::scorep-plugin-cxx)
