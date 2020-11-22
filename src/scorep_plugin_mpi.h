@@ -66,18 +66,6 @@ class scorep_plugin_mpi : public scorep::plugin::base<scorep_plugin_mpi,
         int m_mpi_t_initialized;
 
         size_t m_num_pvars;
-
-        /* Decimate samples by this value */
-        uint32_t m_mpi_samples_decimation;
-
-        /* Decimation counter */
-        uint32_t m_mpi_decimation_counter;
-
-        /* Last read values */
-        uint64_t *m_metrics_last_read_values;
-
-        /* Set this value to 1 to indicate it's the read value duty cycle */
-        uint32_t m_decimation_duty_cycle;
 };
 
 
@@ -88,27 +76,8 @@ scorep_plugin_mpi::get_current_value(int32_t id, Proxy& proxy)
     /* Enumerate PVARs */
     if (__builtin_expect(m_mpi_t_initialized, 1)) {
 
-        if (id == 0) {
-            if ((m_mpi_decimation_counter & (m_mpi_samples_decimation-1)) == 0) {
-                m_decimation_duty_cycle = 1;
-            }
-            else {
-                m_decimation_duty_cycle = 0;
-            }
-
-            m_mpi_decimation_counter++;
-        }
-
-        //printf("id=%u, m_mpi_decimation_counter=%u, m_decimation_duty_cycle=%u, m_mpi_samples_decimation=%u\n",
-        //    id, m_mpi_decimation_counter, m_decimation_duty_cycle, m_mpi_samples_decimation);
-
         /* Record current MPI_T value */
-        if (m_decimation_duty_cycle) {
-            m_metrics_last_read_values[id] =
-                (uint64_t)mpi_t_sampling_object.MPI_T_pvar_current_value_get(id);
-        }
-
-        proxy.write( m_metrics_last_read_values[id] );
+        proxy.write( (uint64_t)mpi_t_sampling_object.MPI_T_pvar_current_value_get(id) );
 
         return;
     }

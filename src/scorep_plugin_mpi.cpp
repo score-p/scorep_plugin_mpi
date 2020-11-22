@@ -5,39 +5,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define ENV_VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION "SCOREP_PLUGIN_MPI_DECIMATION"
-#define VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION_DEFAULT 4
-
 scorep_plugin_mpi::scorep_plugin_mpi()
 {
-    const char *decimation = getenv(ENV_VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION);
-
-    /* Get decimation set by user */
-    if (decimation == NULL) {
-        m_mpi_samples_decimation = VARIABLE_SCOREP_PLUGIN_MPI_DECIMATION_DEFAULT;
-    }
-    else {
-        m_mpi_samples_decimation = atoi(decimation);
-        if ((m_mpi_samples_decimation & (m_mpi_samples_decimation-1)) != 0) {
-            printf("Warning: Samples decimation value must be a power of 2, "
-                "setting to default\n");
-        }
-    }
-
-    printf("Loading Metric Plugin: MPI Sampling (Samples decimation=%u)\n",
-        m_mpi_samples_decimation);
+    DEBUG_PRINT("Loading Metric Plugin: MPI Sampling\n");
 
     m_mpi_t_initialized = 0;
-    m_mpi_decimation_counter = 0;
-    m_metrics_last_read_values = NULL;
-    m_decimation_duty_cycle = 0;
-
 }
 
 scorep_plugin_mpi::~scorep_plugin_mpi()
 {
-    free(m_metrics_last_read_values);
-    m_metrics_last_read_values = NULL;
 }
 
 
@@ -78,13 +54,7 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
         /* Add 1 since the last index also requires an element */
         pvars_max_index = pvars_max_index + 1;
 
-        /* Allocate memory */
-        m_metrics_last_read_values = (uint64_t *)malloc( sizeof(uint64_t) * pvars_max_index );
-
-        m_decimation_duty_cycle = 0;
-
         for (int i = 0; i < m_num_pvars; i++) {
-            m_metrics_last_read_values[i] = 0;
             metric_properties.push_back(
                 MetricProperty(metric_name + "_" + pvars[i].counter_name, "", "").absolute_point().value_uint().decimal());
         }
