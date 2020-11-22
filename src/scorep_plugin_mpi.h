@@ -22,7 +22,7 @@ using ThreadEventPair = std::tuple<ThreadId, std::string>;
 
 
 class scorep_plugin_mpi : public scorep::plugin::base<scorep_plugin_mpi,
-    sync_strict, per_thread, scorep_clock>
+    sync, per_thread, scorep_clock>
 {
     public:
         scorep_plugin_mpi();
@@ -46,6 +46,17 @@ class scorep_plugin_mpi : public scorep::plugin::base<scorep_plugin_mpi,
 
         template <typename Proxy>
         void get_optional_value(int32_t id, Proxy& proxy);
+
+        /* Override, in order to set the delta_t */
+        static SCOREP_Metric_Plugin_Info
+        get_info()
+        {
+            SCOREP_Metric_Plugin_Info info =
+                scorep::plugin::base<scorep_plugin_mpi, sync, per_thread, scorep_clock>::get_info();
+            /* Update the delta_t */
+            info.delta_t = 20000;
+            return info;
+        }
 
     private:
         std::mutex buffer_mutex_;
