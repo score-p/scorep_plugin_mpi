@@ -42,7 +42,7 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
         /* Get static initialization of counters list */
         mpi_t_sampling_object.pvars_enumeration_get(&pvars, &m_num_pvars);
 #endif
-        printf("MPI_T m_num_pvars = %zu\n", m_num_pvars);
+        DEBUG_PRINT("MPI_T m_num_pvars = %zu\n", m_num_pvars);
 
         /* Allocate metrics last values */
         pvars_max_index = 0;
