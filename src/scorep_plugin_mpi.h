@@ -51,10 +51,17 @@ class scorep_plugin_mpi : public scorep::plugin::base<scorep_plugin_mpi,
         static SCOREP_Metric_Plugin_Info
         get_info()
         {
+            const char *profiling_enabled_env = getenv("SCOREP_ENABLE_PROFILING");
+
             SCOREP_Metric_Plugin_Info info =
                 scorep::plugin::base<scorep_plugin_mpi, sync, per_thread, scorep_clock>::get_info();
-            /* Update the delta_t */
-            info.delta_t = 20000;
+
+            /* Cannot update the delta_t when profiling */
+            if (strcmp(profiling_enabled_env, "true") != 0) {
+                /* Update the delta_t */
+                info.delta_t = 20000;
+            }
+
             return info;
         }
 
