@@ -34,3 +34,13 @@ export SCOREP_FILTERING_FILE=./filter.scorep
 # Contact us at,
 shuki.zanyovka@huawei.com
 
+# A note regarding licensing,
+The entire module is licensed via the GPL license but some of the code is based on GYAN, which is part of the mpi-tools git at, 
+https://github.com/llnl/mpi-tools
+
+The GYAN licensed files are the files under the following directory in this git repo,
+- src/mpi_t_sampling
+
+These files are therefore licensed under the GYAN license at,
+https://github.com/LLNL/mpi-tools/blob/master/mpi_t/gyan/LICENSE.txt
+
