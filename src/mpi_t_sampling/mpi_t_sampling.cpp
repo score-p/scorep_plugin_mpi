@@ -43,7 +43,9 @@
 
 #include "mpi_t_sampling.h"
 
+//#define MPI_T_STATIC_COUNTERS_ENABLE
 
+#if defined(MPI_T_STATIC_COUNTERS_ENABLE)
 /*
   Shuki: Temporary, until we resolve the issue of MPI_Init() called after
 		 get_metric_properties() so enumeration cannot take place.
@@ -59,36 +61,117 @@ const static mpi_t_counters mpi_t_counters_enum_const[] = {
 		{ 26, "ompi_mpi_api_bcast_last_buffer_ptr_used" },
 		{ 27, "ompi_mpi_api_gatherv_last_send_size_used" }
 };
+#endif
 
 
 void
 mpi_t_sampling::pvars_enumeration_get(const mpi_t_counters **pvars, size_t *n_pvars)
 {
-	*pvars = mpi_t_counters_enum_const;
-	*n_pvars = sizeof(mpi_t_counters_enum_const) / sizeof(mpi_t_counters_enum_const[0]);
+    /* Enumeration was successful? */
+    if (m_mpi_t_counters_enum_n_objects > 0) {
+        *pvars = m_mpi_t_counters_enum;
+        *n_pvars = m_mpi_t_counters_enum_n_objects;
+    }
+#if defined(MPI_T_STATIC_COUNTERS_ENABLE)
+    else {
+        *pvars = mpi_t_counters_enum_const;
+        *n_pvars = sizeof(mpi_t_counters_enum_const) / sizeof(mpi_t_counters_enum_const[0]);
+    }
+#else
+    else {
+        *pvars = NULL;
+        *n_pvars = 0;
+    }
+#endif
 }
 
 /* Constructor */
 mpi_t_sampling::mpi_t_sampling()
 {
+    m_mpi_t_counters_enum = NULL;
+    m_mpi_t_counters_enum_n_objects = 0;
+
+    /* PVAR handles */
+    m_pvar_handles = NULL;
+
+    m_pvar_index = NULL;
+    m_pvar_count = NULL;
+
+    m_pvar_value_buffer = NULL;
+
+    m_read_value_buffer = NULL;
+
+    m_pvar_num_watched = 0;
+
+    m_total_num_of_var = 0;
+
+    m_max_num_of_state_per_pvar = -1;
+
+    /* Number of MPI tasks */
+    m_num_mpi_tasks = 0;
+
+    m_perf_var_all = NULL;
+    m_pvar_stat = NULL;
 }
+
+#define MPI_T_MALLOC_FREE(iDENTIFIER) \
+    if (iDENTIFIER) { free(iDENTIFIER); iDENTIFIER = NULL; }
 
 /* Destructor */
 mpi_t_sampling::~mpi_t_sampling()
 {
+    int i;
+
+    MPI_T_MALLOC_FREE(m_mpi_t_counters_enum);
+    MPI_T_MALLOC_FREE(m_pvar_handles);
+
+    MPI_T_MALLOC_FREE(m_pvar_index);
+    MPI_T_MALLOC_FREE(m_pvar_count);
+
+    if (m_perf_var_all) {
+        for (i = 0; i < m_total_num_of_var; i++) {
+            MPI_T_MALLOC_FREE(m_perf_var_all[i].name);
+            MPI_T_MALLOC_FREE(m_perf_var_all[i].desc);
+        }
+        MPI_T_MALLOC_FREE(m_perf_var_all);
+    }
+
+    MPI_T_MALLOC_FREE(m_env_var_name);
+    MPI_T_MALLOC_FREE(m_read_value_buffer);
+
+    if (m_pvar_value_buffer) {
+        for (i = 0; i < m_pvar_num_watched; i++) {
+            MPI_T_MALLOC_FREE(m_pvar_value_buffer[i]);
+        }
+        MPI_T_MALLOC_FREE(m_pvar_value_buffer);
+    }
+
+    if (m_pvar_stat) {
+        for (i = 0; i < m_pvar_num_watched; i++) {
+            MPI_T_MALLOC_FREE(m_pvar_stat[i]);
+        }
+        MPI_T_MALLOC_FREE(m_pvar_stat);
+    }
+
+    if (m_mpi_t_counters_enum) {
+        for (i = 0; i < m_mpi_t_counters_enum_n_objects; i++) {
+            MPI_T_MALLOC_FREE(m_mpi_t_counters_enum[i].counter_name);
+        }
+        MPI_T_MALLOC_FREE(m_mpi_t_counters_enum);
+    }
 }
 
 
 void
 mpi_t_sampling::stop_watching(){
    int i;
-   for (i = 0; i < total_num_of_var; i++) {
-	  if (pvar_handles[i] != NULL) {
-		  MPI_T_pvar_stop(session, pvar_handles[i]);
-		  MPI_T_pvar_handle_free(session, &pvar_handles[i]);
+   for (i = 0; i < m_total_num_of_var; i++) {
+	  if (m_pvar_handles[i] != NULL) {
+		  MPI_T_pvar_stop(m_session, m_pvar_handles[i]);
+		  MPI_T_pvar_handle_free(m_session, &m_pvar_handles[i]);
 	  }
    }
-   MPI_T_pvar_session_free(&session);
+   MPI_T_pvar_session_free(&m_session);
 }
 
 int
@@ -118,13 +201,13 @@ mpi_t_sampling::get_watched_var_index_with_class(
    else if( (strcmp(var_class_name, "generic") == 0) || (strcmp(var_class_name, "GENERIC") == 0))
       var_class = MPI_T_PVAR_CLASS_GENERIC;
 
-   //printf("total_num_of_var = %u\n", total_num_of_var);
-   for (i = 0; i < total_num_of_var; i++) {
-      if (perf_var_all && perf_var_all[i].name) {
-         //printf("i = %d: perf_var_all[i].name = %p  ==> ", i, perf_var_all[i].name);
-         //printf("perf_var_all[i].name = %s\n", perf_var_all[i].name);
-         if ( (var_class == perf_var_all[i].var_class) &&
-              (strcmp(var_name, perf_var_all[i].name) == 0) )
+   //printf("m_total_num_of_var = %u\n", m_total_num_of_var);
+   for (i = 0; i < m_total_num_of_var; i++) {
+      if (m_perf_var_all && m_perf_var_all[i].name) {
+         //printf("i = %d: m_perf_var_all[i].name = %p  ==> ", i, m_perf_var_all[i].name);
+         //printf("m_perf_var_all[i].name = %s\n", m_perf_var_all[i].name);
+         if ( (var_class == m_perf_var_all[i].var_class) &&
+              (strcmp(var_name, m_perf_var_all[i].name) == 0) )
             return i;
       }
    }
@@ -146,8 +229,8 @@ mpi_t_sampling::get_watched_var_index(char *var_name)
    }
 
    /* No class was specified */
-   for(i = 0; i < total_num_of_var; i++) {
-      if (strcmp(var_name, perf_var_all[i].name) == 0) {
+   for(i = 0; i < m_total_num_of_var; i++) {
+      if (strcmp(var_name, m_perf_var_all[i].name) == 0) {
          return i;
       }
    }
@@ -164,18 +247,18 @@ void mpi_t_sampling::print_pvar_buffer_all()
 
    printf("%-40s\tType   ", "Variable Name");
    printf(" Minimum(Rank)    Maximum(Rank)       Average\n");
-   for (i = 0; i < pvar_num_watched; i++) {
-      index = pvar_index[i];
-      if (perf_var_all[index].var_class != MPI_T_PVAR_CLASS_TIMER) {
-         for (j = 0; j < pvar_count[i]; j++) {
-        	/* asuming that pvar_count[i] on all
+   for (i = 0; i < m_pvar_num_watched; i++) {
+      index = m_pvar_index[i];
+      if (m_perf_var_all[index].var_class != MPI_T_PVAR_CLASS_TIMER) {
+         for (j = 0; j < m_pvar_count[i]; j++) {
+        	/* asuming that m_pvar_count[i] on all
         	 *  processes was the same */
-            printf("%-40s\t", perf_var_all[index].name);
-            print_class(perf_var_all[index].var_class);
-            printf("\t%8llu(%3d)  %8llu(%3d)  %12.2lf\n", pvar_stat[i][j].min,
-               pvar_stat[i][j].min_rank,
-               pvar_stat[i][j].max, pvar_stat[i][j].max_rank,
-               (pvar_stat[i][j].total / (double)num_mpi_tasks));
+            printf("%-40s\t", m_perf_var_all[index].name);
+            print_class(m_perf_var_all[index].var_class);
+            printf("\t%8llu(%3d)  %8llu(%3d)  %12.2lf\n", m_pvar_stat[i][j].min,
+               m_pvar_stat[i][j].min_rank,
+               m_pvar_stat[i][j].max, m_pvar_stat[i][j].max_rank,
+               (m_pvar_stat[i][j].total / (double)m_num_mpi_tasks));
          }
       }
    }
@@ -187,15 +270,15 @@ void mpi_t_sampling::pvar_read_all()
    int i, j;
    int size;
 
-   for (i = 0; i < total_num_of_var; i++) {
-	  if (pvar_handles[i] != NULL) {
-		  MPI_T_pvar_read(session, pvar_handles[i], read_value_buffer);
+   for (i = 0; i < m_total_num_of_var; i++) {
+	  if (m_pvar_handles[i] != NULL) {
+		  MPI_T_pvar_read(m_session, m_pvar_handles[i], m_read_value_buffer);
 
-		  MPI_Type_size(perf_var_all[i].datatype, &size);
+		  MPI_Type_size(m_perf_var_all[i].datatype, &size);
 
-		  for (j = 0; j < pvar_count[j]; j++) {
-			 pvar_value_buffer[i][j] = 0;
-			 memcpy(&(pvar_value_buffer[i][j]), read_value_buffer, size);
+		  for (j = 0; j < m_pvar_count[j]; j++) {
+			 m_pvar_value_buffer[i][j] = 0;
+			 memcpy(&(m_pvar_value_buffer[i][j]), m_read_value_buffer, size);
 		  }
 	  }
    }
@@ -209,10 +292,10 @@ void mpi_t_sampling::clean_up_perf_var_all(
 {
    int i;
    for(i = 0; i < num_of_perf_var; i++){
-      free(perf_var_all[i].name);
-      free(perf_var_all[i].desc);
+      free(m_perf_var_all[i].name);
+      free(m_perf_var_all[i].desc);
    }
-   free(perf_var_all);
+   free(m_perf_var_all);
 }
 
 
@@ -221,19 +304,19 @@ void mpi_t_sampling::clean_up_pvar_value_buffer(
 {
    int i;
    for(i = 0; i < num_of_var_watched; i++){
-      free(pvar_value_buffer[i]);
+      free(m_pvar_value_buffer[i]);
    }
 
-   free(pvar_value_buffer);
+   free(m_pvar_value_buffer);
 }
 
 
 void mpi_t_sampling::clean_up_the_rest()
 {
-   free(read_value_buffer);
-   free(pvar_handles);
-   free(pvar_index);
-   free(pvar_count);
+   free(m_read_value_buffer);
+   free(m_pvar_handles);
+   free(m_pvar_index);
+   free(m_pvar_count);
 }
 
 
@@ -245,28 +328,28 @@ void mpi_t_sampling::collect_sum_from_all_ranks(MPI_Op op)
 
    unsigned long long int *value_in;
    unsigned long long int *value_out;
-   value_in = (unsigned long long int*)malloc(sizeof(unsigned long long int) * ( max_num_of_state_per_pvar + 1));
-   if(rank == root)
-      value_out = (unsigned long long int*)malloc(sizeof(unsigned long long int) * ( max_num_of_state_per_pvar + 1));
+   value_in = (unsigned long long int*)malloc(sizeof(unsigned long long int) * ( m_max_num_of_state_per_pvar + 1));
+   if(m_rank == root)
+      value_out = (unsigned long long int*)malloc(sizeof(unsigned long long int) * ( m_max_num_of_state_per_pvar + 1));
 
-   for(i = 0; i < pvar_num_watched; i++){
-      for(j = 0; j < pvar_count[i]; j++){
-         value_in[j] = pvar_value_buffer[i][j];
+   for(i = 0; i < m_pvar_num_watched; i++){
+      for(j = 0; j < m_pvar_count[i]; j++){
+         value_in[j] = m_pvar_value_buffer[i][j];
       }
-      PMPI_Reduce(value_in, value_out, pvar_count[i] /*number_of_elements*/, MPI_UNSIGNED_LONG_LONG, op, root, MPI_COMM_WORLD);
-      if(root == rank){
+      PMPI_Reduce(value_in, value_out, m_pvar_count[i] /*number_of_elements*/, MPI_UNSIGNED_LONG_LONG, op, root, MPI_COMM_WORLD);
+      if(root == m_rank){
          /**
-          * Populate these values into the pvar_stat array of rank 0.
+          * Populate these values into the m_pvar_stat array of rank 0.
           */
-         for(j = 0; j < pvar_count[i]; j++){
-            pvar_stat[i][j].total = value_out[j];
+         for(j = 0; j < m_pvar_count[i]; j++){
+            m_pvar_stat[i][j].total = value_out[j];
          }
-      }// root is done extracting information from "out" to pvar_stat
+      }// root is done extracting information from "out" to m_pvar_stat
    }
 
    free(value_in);
 
-   if(root == rank) {
+   if(root == m_rank) {
       free(value_out);
    }
 }
@@ -286,32 +369,32 @@ void mpi_t_sampling::collect_range_with_loc_from_all_ranks(MPI_Op op)
    /**
     * MPI_Reduce on each element. Each element here is a performance variable
     */
-   in = (mpi_data*)malloc(sizeof(mpi_data) * ( max_num_of_state_per_pvar + 1));
-   if(rank == root)
-      out = (mpi_data*)malloc(sizeof(mpi_data) * (max_num_of_state_per_pvar + 1));
-   for(i = 0; i < pvar_num_watched; i++){
-      for(j = 0; j < pvar_count[i]; j++){
+   in = (mpi_data*)malloc(sizeof(mpi_data) * ( m_max_num_of_state_per_pvar + 1));
+   if(m_rank == root)
+      out = (mpi_data*)malloc(sizeof(mpi_data) * (m_max_num_of_state_per_pvar + 1));
+   for(i = 0; i < m_pvar_num_watched; i++){
+      for(j = 0; j < m_pvar_count[i]; j++){
          in[j].value = 0;
-         in[j].value = (double)(pvar_value_buffer[i][j]);
-         in[j].rank = rank;
+         in[j].value = (double)(m_pvar_value_buffer[i][j]);
+         in[j].rank = m_rank;
       }
-      PMPI_Reduce(in, out, pvar_count[i] /*number_of_elements*/, MPI_DOUBLE_INT, op, root, MPI_COMM_WORLD);
+      PMPI_Reduce(in, out, m_pvar_count[i] /*number_of_elements*/, MPI_DOUBLE_INT, op, root, MPI_COMM_WORLD);
       //printout
-      if(root == rank){
-         for(j = 0; j < pvar_count[i]; j++){
+      if(root == m_rank){
+         for(j = 0; j < m_pvar_count[i]; j++){
             if(op == MPI_MINLOC){
-               pvar_stat[i][j].min = (unsigned long long int)(out[j].value);
-               pvar_stat[i][j].min_rank = out[j].rank;
+               m_pvar_stat[i][j].min = (unsigned long long int)(out[j].value);
+               m_pvar_stat[i][j].min_rank = out[j].rank;
             }
             else if(op == MPI_MAXLOC){
-               pvar_stat[i][j].max = (unsigned long long int)(out[j].value);
-               pvar_stat[i][j].max_rank = out[j].rank;
+               m_pvar_stat[i][j].max = (unsigned long long int)(out[j].value);
+               m_pvar_stat[i][j].max_rank = out[j].rank;
             }
          }
       }
    }
    free(in);
-   if(root == rank)
+   if(root == m_rank)
       free(out);
 }
 
@@ -355,10 +438,10 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
    size_t sz;
 
    /* get global rank */
-   PMPI_Comm_rank(MPI_COMM_WORLD, &rank);
+   PMPI_Comm_rank(MPI_COMM_WORLD, &m_rank);
 
    /* get number of tasks*/
-   PMPI_Comm_size(MPI_COMM_WORLD, &num_mpi_tasks);
+   PMPI_Comm_size(MPI_COMM_WORLD, &m_num_mpi_tasks);
 
    /* Run MPI_T Initialization */
    err = MPI_T_init_thread(MPI_THREAD_SINGLE, &threadsup);
@@ -368,7 +451,7 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
    }
 
    /* Print thread support for MPI */
-   if(!rank) {
+   if(!m_rank) {
 	  DEBUG_PRINT("MPI_T Thread support: ");
       switch (threadsup) {
       case MPI_THREAD_SINGLE:
@@ -388,16 +471,16 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
       }
    }
 
-   /* Create a session */
-   err = MPI_T_pvar_session_create(&session);
+   /* Create a m_session */
+   err = MPI_T_pvar_session_create(&m_session);
    if (err != MPI_SUCCESS) {
-	  printf("MPI_T_pvar_session_create() - Failed err=%d\n", err);
+	  printf("MPI_T_pvar_m_session_create() - Failed err=%d\n", err);
       return err;
    }
 
    /* Get number of variables */
    err = MPI_T_pvar_get_num(&num);
-   if(!rank) {
+   if(!m_rank) {
       printf("%d performance variables exposed by this MPI library\n",num);
    }
    if (err != MPI_SUCCESS) {
@@ -406,15 +489,15 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
    }
 
    /* Total number of variables */
-   total_num_of_var = num;
+   m_total_num_of_var = num;
 
    /* Get the name of the environment variable to look for */
-   env_var_name = getenv("MPIT_VAR_TO_TRACE");
+   m_env_var_name = getenv("MPIT_VAR_TO_TRACE");
    int set_default = 0;
-   if (env_var_name != NULL) {
-      DEBUG_PRINT("Environment variable set: %s\n", env_var_name);
+   if (m_env_var_name != NULL) {
+      DEBUG_PRINT("Environment variable set: %s\n", m_env_var_name);
 
-      if(strlen(env_var_name) == 0) {
+      if(strlen(m_env_var_name) == 0) {
          set_default = 1;
       }
    }
@@ -423,18 +506,18 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
    }
 
    /* Allocate handles for all performance variables*/
-   pvar_handles = (MPI_T_pvar_handle *)malloc(sizeof(MPI_T_pvar_handle) * (num + 1));
-   pvar_index = (int*)malloc(sizeof(int) * (num + 1));
-   pvar_count = (int*)malloc(sizeof(int) * (num + 1));
-   memset(pvar_count, 0, sizeof(int) * (num + 1));
+   m_pvar_handles = (MPI_T_pvar_handle *)malloc(sizeof(MPI_T_pvar_handle) * (num + 1));
+   m_pvar_index = (int*)malloc(sizeof(int) * (num + 1));
+   m_pvar_count = (int*)malloc(sizeof(int) * (num + 1));
+   memset(m_pvar_count, 0, sizeof(int) * (num + 1));
 
    sz = sizeof(PERF_VAR) * (num + 1);
-   perf_var_all = (PERF_VAR *)malloc(sz);
-   memset(perf_var_all, 0x00, sz);
+   m_perf_var_all = (PERF_VAR *)malloc(sz);
+   memset(m_perf_var_all, 0x00, sz);
 
    sz = sizeof(STATISTICS *) * (num + 1);
-   pvar_stat = (STATISTICS **)malloc(sz);
-   memset(pvar_stat, 0x00, sz);
+   m_pvar_stat = (STATISTICS **)malloc(sz);
+   memset(m_pvar_stat, 0x00, sz);
    
    total_length_pvar_name = 0;
    for (i = 0; i < num; i++) {
@@ -458,126 +541,143 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
             &continuous /*OUT*/,
             &atomic/*OUT*/);
       if (err != MPI_SUCCESS) {
-    	  perf_var_all[i].pvar_valid = 0;
+    	  m_perf_var_all[i].pvar_valid = 0;
     	  DEBUG_PRINT("[%d] err=%d\n", i, err);
     	  /* Next iteration */
     	  continue;
       }
       else {
-    	  perf_var_all[i].pvar_valid = 1;
+    	  m_perf_var_all[i].pvar_valid = 1;
       }
 
-      perf_var_all[i].pvar_index = -1; // gets setup later
-      perf_var_all[i].name_len = namelen;
-      perf_var_all[i].name = (char *)malloc(sizeof(char) * (namelen + 1));
-      strcpy(perf_var_all[i].name, name);
+      m_perf_var_all[i].pvar_index = -1; // gets setup later
+      m_perf_var_all[i].name_len = namelen;
+      m_perf_var_all[i].name = (char *)malloc(sizeof(char) * (namelen + 1));
+      strcpy(m_perf_var_all[i].name, name);
 
       /* Shuki: Debug */
       DEBUG_PRINT("[%d] err=%d pvar name detected: %s, bind=%d\n", i, err, name, bind);
 
       total_length_pvar_name += namelen;
 
-      perf_var_all[i].verbosity = verb;
-      perf_var_all[i].var_class = varclass;
-      perf_var_all[i].datatype = datatype;
-      perf_var_all[i].enumtype = enumtype;
-      perf_var_all[i].desc_len = desc_len;
-      perf_var_all[i].desc = (char *)malloc(sizeof(char) * (desc_len + 1));
-      strcpy(perf_var_all[i].desc, desc);
-      perf_var_all[i].binding = bind;
-      perf_var_all[i].readonly = readonly;
-      perf_var_all[i].continuous = continuous;
-      perf_var_all[i].atomic = atomic;
+      m_perf_var_all[i].verbosity = verb;
+      m_perf_var_all[i].var_class = varclass;
+      m_perf_var_all[i].datatype = datatype;
+      m_perf_var_all[i].enumtype = enumtype;
+      m_perf_var_all[i].desc_len = desc_len;
+      m_perf_var_all[i].desc = (char *)malloc(sizeof(char) * (desc_len + 1));
+      strcpy(m_perf_var_all[i].desc, desc);
+      m_perf_var_all[i].binding = bind;
+      m_perf_var_all[i].readonly = readonly;
+      m_perf_var_all[i].continuous = continuous;
+      m_perf_var_all[i].atomic = atomic;
    }
 
    /* Enumerate all MPI_T variables */
    if (set_default == 1) {
       /*By default, watch all variables in the list.*/
-      //env_var_name = get_pvars_name_list();
+      //m_env_var_name = get_pvars_name_list();
       /* Allocate string buffers */
 	  size_t size_to_alloc =
 		  sizeof(char)* (total_length_pvar_name + num * 8 /*strlen(:CLASS_NAME)*/ +
 		  num /*delimiter*/ + 1);
-      env_var_name = (char *)malloc(size_to_alloc);
+      m_env_var_name = (char *)malloc(size_to_alloc);
       int index = 0;
       const char *class_name;
       for (i = 0; i < num; i++)
       {
-    	 if (perf_var_all[i].pvar_valid) {
-            memcpy((env_var_name + index), perf_var_all[i].name,
-           		strlen(perf_var_all[i].name));
-            index += (strlen(perf_var_all[i].name) );
+    	 if (m_perf_var_all[i].pvar_valid) {
+            memcpy((m_env_var_name + index), m_perf_var_all[i].name,
+           		strlen(m_perf_var_all[i].name));
+            index += (strlen(m_perf_var_all[i].name) );
 
-            memcpy((env_var_name + index), ":", strlen(":"));
+            memcpy((m_env_var_name + index), ":", strlen(":"));
             index += (strlen(":"));
 
-            class_name = get_pvar_class(perf_var_all[i].var_class);
-            memcpy((env_var_name + index), class_name, strlen(class_name));
+            class_name = get_pvar_class(m_perf_var_all[i].var_class);
+            memcpy((m_env_var_name + index), class_name, strlen(class_name));
             index += (strlen(class_name));
 
-            memcpy((env_var_name + index), ";", strlen(";"));
+            memcpy((m_env_var_name + index), ";", strlen(";"));
             index += (strlen(";"));
     	 }
       }
-      env_var_name[index] = 0;
+      m_env_var_name[index] = 0;
    }
 
-   /* Now, start session for those variables in the watchlist*/
+   /* Now, start m_session for those variables in the watchlist*/
    DEBUG_PRINT("Scanning MPI_T counters...\n");
    DEBUG_PRINT("==========================\n");
 
-   pvar_num_watched = 0;
-   char *p = strtok(env_var_name, ";");
-   pvar_value_buffer =
+   m_pvar_num_watched = 0;
+   char *p = strtok(m_env_var_name, ";");
+   m_pvar_value_buffer =
       (unsigned long long int **)malloc(sizeof(unsigned long long int*) * (num + 1));
    int max_count = -1;
    int k;
+   size_t slen;
+
+   m_mpi_t_counters_enum =
+       (mpi_t_counters *)malloc(sizeof(*m_mpi_t_counters_enum) * (num + 1));
+
    while (p != NULL) {
       index = get_watched_var_index(p);
       DEBUG_PRINT("[%d] p = %s\n", index, p);
+
+      slen = strlen(p);
+
+      /* Add counter to list */
+      if (slen > 0) {
+          m_mpi_t_counters_enum[m_pvar_num_watched].counter_index = index;
+          m_mpi_t_counters_enum[m_pvar_num_watched].counter_name = (char *)malloc(slen+1);
+          if (m_mpi_t_counters_enum[m_pvar_num_watched].counter_name != NULL) {
+              strcpy(m_mpi_t_counters_enum[m_pvar_num_watched].counter_name, p);
+          }
+      }
+
       if (index != NOT_FOUND) {
     	 void *object_handle = NULL;
-         pvar_index[pvar_num_watched] = index;
-         perf_var_all[index].pvar_index = pvar_num_watched;
+         m_pvar_index[m_pvar_num_watched] = index;
+         m_perf_var_all[index].pvar_index = m_pvar_num_watched;
 #if 0 /* Shuki: TODO - Need to check this issue */
-         if (perf_var_all[i].binding == MPI_T_BIND_MPI_WIN) {
+         if (m_perf_var_all[i].binding == MPI_T_BIND_MPI_WIN) {
         	 object_handle = MPI_COMM_WORLD;
          }
 #endif
-         err = MPI_T_pvar_handle_alloc(session, index, object_handle,
-        		 &pvar_handles[index],
-        		 &pvar_count[pvar_num_watched]);
+         err = MPI_T_pvar_handle_alloc(m_session, index, object_handle,
+        		 &m_pvar_handles[index],
+        		 &m_pvar_count[m_pvar_num_watched]);
          DEBUG_PRINT("MPI_T_pvar_handle_alloc(): err = %d handle=%p\n",
-       		 err, pvar_handles[index]);
+       		 err, m_pvar_handles[index]);
          if (err == MPI_SUCCESS) {
         	size_t size1;
         	size_t size2;
 
-        	size1 = sizeof(unsigned long long int) * (pvar_count[pvar_num_watched] + 1);
-            pvar_value_buffer[pvar_num_watched] =
+        	size1 = sizeof(unsigned long long int) * (m_pvar_count[m_pvar_num_watched] + 1);
+            m_pvar_value_buffer[m_pvar_num_watched] =
             	(unsigned long long int *)malloc(size1);
 
-        	size2 = sizeof(STATISTICS) * (pvar_count[pvar_num_watched] + 1);
-            pvar_stat[pvar_num_watched] =
+        	size2 = sizeof(STATISTICS) * (m_pvar_count[m_pvar_num_watched] + 1);
+            m_pvar_stat[m_pvar_num_watched] =
             	(STATISTICS *)malloc(size2);
 
-            memset(pvar_value_buffer[pvar_num_watched], 0,
-            	sizeof(unsigned long long int) * pvar_count[pvar_num_watched]);
+            memset(m_pvar_value_buffer[m_pvar_num_watched], 0,
+            	sizeof(unsigned long long int) * m_pvar_count[m_pvar_num_watched]);
 
-            for (k = 0; k < pvar_count[pvar_num_watched]; k++){
-               pvar_value_buffer[pvar_num_watched][k] = 0;
-               pvar_stat[pvar_num_watched][k].max = NEG_INF;
-               pvar_stat[pvar_num_watched][k].min = POS_INF;
-               pvar_stat[pvar_num_watched][k].total = 0;
+            for (k = 0; k < m_pvar_count[m_pvar_num_watched]; k++){
+               m_pvar_value_buffer[m_pvar_num_watched][k] = 0;
+               m_pvar_stat[m_pvar_num_watched][k].max = NEG_INF;
+               m_pvar_stat[m_pvar_num_watched][k].min = POS_INF;
+               m_pvar_stat[m_pvar_num_watched][k].total = 0;
 
             }
 
-            if(max_count < pvar_count[pvar_num_watched]) {
-               max_count = pvar_count[pvar_num_watched];
+            if(max_count < m_pvar_count[m_pvar_num_watched]) {
+               max_count = m_pvar_count[m_pvar_num_watched];
             }
 
-            if(perf_var_all[index].continuous == 0){
-               err = MPI_T_pvar_start(session, pvar_handles[index]);
+            if(m_perf_var_all[index].continuous == 0){
+               err = MPI_T_pvar_start(m_session, m_pvar_handles[index]);
             }
 
             if (err != MPI_SUCCESS) {
@@ -585,27 +685,27 @@ int mpi_t_sampling::MPI_T_pvars_enumerate()
                return err;
             }
 
-            pvar_num_watched++;
+            m_pvar_num_watched++;
          }
       }
       p = strtok(NULL, ";");
    }
 
-   read_value_buffer = (void *)malloc(sizeof(unsigned long long int) * (max_count + 1));
-   max_num_of_state_per_pvar = max_count;
+   m_read_value_buffer = (void *)malloc(sizeof(unsigned long long int) * (max_count + 1));
+   m_max_num_of_state_per_pvar = max_count;
 
-   DEBUG_PRINT("Finished 1\n");
+   DEBUG_PRINT("Finished\n");
 
-   assert(num >= pvar_num_watched);
-   assert(pvar_value_buffer != NULL);
+   m_mpi_t_counters_enum_n_objects = (size_t)m_pvar_num_watched;
+
+   assert(num >= m_pvar_num_watched);
+   assert(m_pvar_value_buffer != NULL);
    /* iterate unit variable is found */
-   tool_enabled = TRUE;
-   num_send = 0;
-   num_isend = 0;
-   num_recv = 0;
-   num_irecv = 0;
-
-   DEBUG_PRINT("Finished 2\n");
+   m_tool_enabled = TRUE;
+   m_num_send = 0;
+   m_num_isend = 0;
+   m_num_recv = 0;
+   m_num_irecv = 0;
 
    return 0;
 }
@@ -621,24 +721,24 @@ int mpi_t_sampling::MPI_Finalize(void)
    collect_range_with_loc_from_all_ranks(MPI_MAXLOC);
    collect_sum_from_all_ranks(MPI_SUM);
 
-   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, rank);
+   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, m_rank);
 
-   if (rank == 0) {
+   if (m_rank == 0) {
       DEBUG_PRINT("Performance profiling for the complete MPI job:\n");
       print_pvar_buffer_all();
    }
    stop_watching();
-   clean_up_perf_var_all(total_num_of_var);
-   clean_up_pvar_value_buffer(pvar_num_watched);
+   clean_up_perf_var_all(m_total_num_of_var);
+   clean_up_pvar_value_buffer(m_pvar_num_watched);
    clean_up_the_rest();
 
-   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, rank);
+   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, m_rank);
 
    PMPI_Barrier(MPI_COMM_WORLD);
 
    MPI_T_finalize();
 
-   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, rank);
+   DEBUG_PRINT("%s:%d rank = %d\n", __func__, __LINE__, m_rank);
 
    return PMPI_Finalize();
 }
@@ -651,27 +751,27 @@ mpi_t_sampling::MPI_T_pvar_current_value_get(int32_t index)
    int i, j;
    int size;
 
-   for (i = 0; i < pvar_num_watched; i++) {
-      MPI_T_pvar_read(session, pvar_handles[i], read_value_buffer);
+   for (i = 0; i < m_pvar_num_watched; i++) {
+      MPI_T_pvar_read(m_session, m_pvar_handles[i], m_read_value_buffer);
 
-      MPI_Type_size(perf_var_all[i].datatype, &size);
+      MPI_Type_size(m_perf_var_all[i].datatype, &size);
 
-      for (j = 0; j < pvar_count[j]; j++) {
-         pvar_value_buffer[i][j] = 0;
-         memcpy(&(pvar_value_buffer[i][j]), read_value_buffer, size);
+      for (j = 0; j < m_pvar_count[j]; j++) {
+         m_pvar_value_buffer[i][j] = 0;
+         memcpy(&(m_pvar_value_buffer[i][j]), m_read_value_buffer, size);
       }
    }
 #else
    //std::cout << "MPI_T_pvar_current_value_get(index = " << index <<
-   //	   "), pvar_handles[index]=" <<pvar_handles[index] << "\n";
-   DEBUG_PRINT("MPI_T_pvar_current_value_get() - index=%d: pvar_handles[index]=%p\n",
-	   index, pvar_handles[index]);
+   //	   "), m_pvar_handles[index]=" <<m_pvar_handles[index] << "\n";
+   DEBUG_PRINT("MPI_T_pvar_current_value_get() - index=%d: m_pvar_handles[index]=%p\n",
+	   index, m_pvar_handles[index]);
 
-   MPI_T_pvar_read(session, pvar_handles[index], read_value_buffer);
+   MPI_T_pvar_read(m_session, m_pvar_handles[index], m_read_value_buffer);
 
 #endif
 
-   return ((uint64_t *)read_value_buffer)[0];
+   return ((uint64_t *)m_read_value_buffer)[0];
 }
 
 int

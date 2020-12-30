@@ -12,6 +12,27 @@
 #include <stdio.h>
 
 
+/* Global argc and argv*/
+int global_argc = 0;
+char** global_argv = NULL;
+
+/*
+   putting the constructor in the .init_array section.
+   Functions in the .init_array (unlike .init) are called with the same arguments
+   main will be called with: argc, argv and env.
+*/
+static int
+printargs(int argc, char** argv, char** env) {
+  DEBUG_PRINT("In printargs:\n");
+  global_argc = argc;
+  global_argv = argv;
+
+  return 0;
+}
+
+/* Put the function into the init_array */
+__attribute__((section(".init_array"))) static void *ctr = (void *)&printargs;
+
 scorep_plugin_mpi::scorep_plugin_mpi()
 {
     DEBUG_PRINT("Loading Metric Plugin: MPI Sampling\n");
@@ -44,6 +65,20 @@ scorep_plugin_mpi::get_metric_properties(const std::string& metric_name)
     /* MPI_T? */
     if (event == "MPI_T") {
         /* Enumerate PVARs */
+
+        int ret;
+        int is_initialized;
+
+        /* Don't re-initialize MPI if already iniitalized */
+        ret = PMPI_Initialized(&is_initialized);
+        DEBUG_PRINT("MPI_Init(): Checking if initialized: %d\n", is_initialized);
+        if (!is_initialized) {
+           DEBUG_PRINT("get_metric_properties: global_argc=%d, global_argv=%p",
+               global_argc, global_argv);
+           PMPI_Init(&global_argc, &global_argv);
+        }
+        mpi_t_sampling_object.MPI_T_pvars_enumerate();
+
 #if 0 /* Cannot enumerate since MPI_Init() has not executed yet by Score-P framework */
         //mpi_t_sampling_object.MPI_T_pvars_enumerate();
 #else
@@ -92,6 +127,7 @@ scorep_plugin_mpi::add_metric(const std::string& metric)
     /* MPI_T? */
     if (event == "MPI_T") {
         static int32_t allocated_index = 0;
+
 
         /* Get static initialization of counters list */
         mpi_t_sampling_object.pvars_enumeration_get(&pvars, &n_pvars);

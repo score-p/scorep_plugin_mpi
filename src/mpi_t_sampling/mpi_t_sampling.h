@@ -80,7 +80,7 @@ typedef struct {
 	unsigned int counter_index;
 
 	/* Name of the counter*/
-	const char   *counter_name;
+	char   *counter_name;
 
 } mpi_t_counters;
 
@@ -156,40 +156,46 @@ public:
 
 private:
    /* PVAR session */
-   MPI_T_pvar_session session;
+   MPI_T_pvar_session m_session;
 
    /* PVAR handles */
-   MPI_T_pvar_handle *pvar_handles;
+   MPI_T_pvar_handle *m_pvar_handles;
 
-   int *pvar_index;
-   int *pvar_count;
+   int *m_pvar_index;
+   int *m_pvar_count;
 
    /* cumulative values */
-   unsigned long long int **pvar_value_buffer;
+   unsigned long long int **m_pvar_value_buffer;
 
    /* values are read into this buffer */
-   void *read_value_buffer;
+   void *m_read_value_buffer;
 
    /* Number of watched variables */
-   int pvar_num_watched;
+   int m_pvar_num_watched;
 
    /* Total number of MPI variables */
-   int total_num_of_var;
+   int m_total_num_of_var;
 
-   int max_num_of_state_per_pvar = -1; //  max_num_of_state_per_pvar = max(pvar_count[performance_variable]) for all performance_variables
+   int m_max_num_of_state_per_pvar = -1; //  max_num_of_state_per_pvar = max(pvar_count[performance_variable]) for all performance_variables
 
    /* Number of MPI tasks */
-   int num_mpi_tasks;
+   int m_num_mpi_tasks;
 
-   PERF_VAR *perf_var_all;
-   STATISTICS **pvar_stat;
+   PERF_VAR *m_perf_var_all;
+   STATISTICS **m_pvar_stat;
 
-   char *env_var_name;
-   int tool_enabled = FALSE;
-   int num_send, num_isend, num_recv, num_irecv;
+   char *m_env_var_name;
+   int m_tool_enabled = FALSE;
+   int m_num_send;
+   int m_num_isend;
+   int m_num_recv;
+   int m_num_irecv;
 
    /* Rank */
-   int rank = 0;
+   int m_rank = 0;
+
+   mpi_t_counters *m_mpi_t_counters_enum;
+   size_t          m_mpi_t_counters_enum_n_objects;
 
    /* MPI init already called */
    int m_mpi_init_called;
@@ -198,7 +204,7 @@ private:
 inline int
 mpi_t_sampling::mpi_rank_get()
 {
-    return this->rank;
+    return this->m_rank;
 }
 
 #endif /* _MPI_T_SAMPLING_H_ */
