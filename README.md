@@ -1,18 +1,27 @@
 # scorep_plugin_mpi
+
 Score-P MPI data acquisition plugin
 
 # To clone,
+
 $ git clone --recurse-submodules  https://github.com/shuki-zanyovka/scorep_plugin_mpi
 $ cd scorep_plugin_mpi
 
 # To build,
+
 mkdir BUILD
 cd BUILD
 
 cmake ../ -DCMAKE_C_STANDARD_COMPUTED_DEFAULT=GNU -DCMAKE_CXX_STANDARD_COMPUTED_DEFAULT=GNU -DCMAKE_CXX_COMPILER=mpic++ -DCMAKE_C_COMPILER=mpicc
 make
 
+
+# OpenMPI patches
+
+For using with OpenMPI, please review and apply all patches under ./openmpi-patches directory (already applied in HMPI). These patches will also add multiple new PVARs to OpenMPI.
+
 # To use, please enable the plugin as follows,
+
 export LOCAL_USER_SCOREP_INSTALL_PATH=<Score-P 6.0 Install Path>/scorep-6.0
 export SCOREP_PLUGIN_MPI_PATH=<Plugin Path>/scorep_plugin_mpi/BUILD
 export OMPI_PATH=<OpenMPI Install Path>
@@ -24,17 +33,21 @@ export SCOREP_METRIC_PLUGINS="scorep_plugin_mpi"
 export SCOREP_METRIC_SCOREP_PLUGIN_MPI=MPI_T@1
 
 # Disable profilin and enable tracing,
+
 export SCOREP_ENABLE_PROFILING=false
 export SCOREP_ENABLE_TRACING=true
 export SCOREP_TOTAL_MEMORY=4000M
 
 # It is recommended to use a Score-P filter file to reduce Score-P overhead,
+
 export SCOREP_FILTERING_FILE=./filter.scorep
 
 # Contact us at,
+
 shuki.zanyovka@huawei.com
 
 # A note regarding licensing,
+
 The entire module is licensed via the GPL license but some of the code is based on GYAN, which is part of the mpi-tools git at, 
 https://github.com/llnl/mpi-tools
 

@@ -1,0 +1,277 @@
+From bea1c48a2ec3aeee7f95a3d2c1f8a381e5844007 Mon Sep 17 00:00:00 2001
+From: Shuki Zanyovka <shuki.zanyovka@huawei.com>
+Date: Sun, 2 Aug 2020 23:38:34 +0300
+Subject: [PATCH 1/2] MPI_T: Add 4 new metrics for MPI_Reduce()/MPI_Allreduce()
+
+- Add 4 new metrics (counters) for MPI_Reduce()/MPI_Allreduce() called with
+  the same params:
+  - ompi_mpi_api_allreduce_same_sendbuf
+  - ompi_mpi_api_allreduce_same_recvbuf
+  - ompi_mpi_api_reduce_same_sendbuf
+  - ompi_mpi_api_reduce_same_recvbuf
+---
+ ompi/mpi/c/Makefile.am         |  3 +-
+ ompi/mpi/c/allreduce.c         |  5 +++
+ ompi/mpi/c/init.c              |  7 ++++
+ ompi/mpi/c/mpi_api_pvars.c     | 51 ++++++++++++++++++++++++
+ ompi/mpi/c/mpi_api_pvars.h     | 90 ++++++++++++++++++++++++++++++++++++++++++
+ ompi/mpi/c/profile/Makefile.am |  3 +-
+ ompi/mpi/c/reduce.c            |  5 +++
+ 7 files changed, 162 insertions(+), 2 deletions(-)
+ create mode 100644 ompi/mpi/c/mpi_api_pvars.c
+ create mode 100644 ompi/mpi/c/mpi_api_pvars.h
+
+diff --git a/ompi/mpi/c/Makefile.am b/ompi/mpi/c/Makefile.am
+index d4c822b..842d824 100644
+--- a/ompi/mpi/c/Makefile.am
++++ b/ompi/mpi/c/Makefile.am
+@@ -434,7 +434,8 @@ libmpi_c_mpi_la_SOURCES = \
+         win_test.c \
+         win_unlock.c \
+ 	win_unlock_all.c \
+-        win_wait.c
++        win_wait.c \
++        mpi_api_pvars.c
+ 
+ 
+ if OMPI_ENABLE_MPI1_COMPAT
+diff --git a/ompi/mpi/c/allreduce.c b/ompi/mpi/c/allreduce.c
+index c756859..b2e9602 100644
+--- a/ompi/mpi/c/allreduce.c
++++ b/ompi/mpi/c/allreduce.c
+@@ -33,6 +33,8 @@
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
+ 
++#include "ompi/mpi/c/mpi_api_pvars.h"
++
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+ #pragma weak MPI_Allreduce = PMPI_Allreduce
+@@ -48,6 +50,9 @@ int MPI_Allreduce(const void *sendbuf, void *recvbuf, int count,
+ {
+     int err;
+ 
++    /* Count same params */
++    MPI_API_PVARS_ALL_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count);
++
+     SPC_RECORD(OMPI_SPC_ALLREDUCE, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/init.c b/ompi/mpi/c/init.c
+index 591ff86..9f4ba25 100644
+--- a/ompi/mpi/c/init.c
++++ b/ompi/mpi/c/init.c
+@@ -31,6 +31,8 @@
+ #include "ompi/errhandler/errhandler.h"
+ #include "ompi/constants.h"
+ 
++#include "ompi/mpi/c/mpi_api_pvars.h"
++
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+ #pragma weak MPI_Init = PMPI_Init
+@@ -86,5 +88,10 @@ int MPI_Init(int *argc, char ***argv)
+ 
+     SPC_INIT();
+ 
++#if defined(MPI_API_PVARS_ENABLE)
++    /* Initialize MPI API PVARs */
++    mpi_api_pvars_init();
++#endif
++
+     return MPI_SUCCESS;
+ }
+diff --git a/ompi/mpi/c/mpi_api_pvars.c b/ompi/mpi/c/mpi_api_pvars.c
+new file mode 100644
+index 0000000..d1d09ee
+--- /dev/null
++++ b/ompi/mpi/c/mpi_api_pvars.c
+@@ -0,0 +1,51 @@
++/**
++* Copyright (C) Huawei Technologies Co., Ltd. 2020.  ALL RIGHTS RESERVED.
++*/
++
++#include "ompi/mpi/c/mpi_api_pvars.h"
++
++/* PVARs structure */
++ompi_api_pvars_t ompi_api_pvars;
++
++int mpi_api_pvars_init(void)
++{
++   const char *project = "ompi";
++   const char *framework = "ompi";
++   const char *component = "mpi_api";
++   int ret;
++
++   /* Zero all counters */
++   memset(&ompi_api_pvars, 0x00, sizeof(ompi_api_pvars));
++
++   /* register performance variables */
++   ret = mca_base_pvar_register(project, framework, component, 
++                                "allreduce_same_sendbuf", "Number of times MPI_Allreduce() was called with the same sendbuf consecutively",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.allreduce_same_sendbuf_cnt);
++
++   ret = mca_base_pvar_register(project, framework, component,
++                                "allreduce_same_recvbuf", "Number of times MPI_Allreduce() was called with the same recvbuf consecutively",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.allreduce_same_recvbuf_cnt);
++
++   ret = mca_base_pvar_register(project, framework, component, 
++                                "reduce_same_sendbuf", "Number of times MPI_Reduce() was called with the same sendbuf consecutively",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.reduce_same_sendbuf_cnt);
++
++   ret = mca_base_pvar_register(project, framework, component,
++                                "reduce_same_recvbuf", "Number of times MPI_Reduce() was called with the same recvbuf consecutively",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.reduce_same_recvbuf_cnt);
++
++   return OPAL_SUCCESS;
++}
++
+diff --git a/ompi/mpi/c/mpi_api_pvars.h b/ompi/mpi/c/mpi_api_pvars.h
+new file mode 100644
+index 0000000..b772f1c
+--- /dev/null
++++ b/ompi/mpi/c/mpi_api_pvars.h
+@@ -0,0 +1,90 @@
++/**
++* Copyright (C) Huawei Technologies Co., Ltd. 2020.  ALL RIGHTS RESERVED.
++*/
++
++#if !defined(_MPI_API_PVARS_H_)
++#define _MPI_API_PVARS_H_
++
++#include "ompi/datatype/ompi_datatype.h"
++#include "ompi/runtime/params.h"
++#include "opal/mca/timer/timer.h"
++#include "opal/mca/base/mca_base_pvar.h"
++
++/* Enables MPI API PVARs */
++#define MPI_API_PVARS_ENABLE
++
++/* Enables MPI API PVARs debug prints */
++//#define MPI_T_API_PVARS_DEBUG_ENABLE
++
++#if defined(MPI_T_API_PVARS_DEBUG_ENABLE)
++#define MPI_T_API_PVARS_DEBUG_PRINT printf
++#else
++#define MPI_T_API_PVARS_DEBUG_PRINT
++#endif
++
++/* A structure for the OMPI API PVARs */
++typedef struct ompi_api_pvars_s {
++   /* Counts the number of consecutive MPI_Allreduce() calls with the same sendbuf and count */
++   volatile opal_atomic_size_t allreduce_same_sendbuf_cnt;
++
++   /* Counts the number of consecutive MPI_Allreduce() calls with the same recvbuf and count */
++   volatile opal_atomic_size_t allreduce_same_recvbuf_cnt;
++
++   /* Counts the number of consecutive MPI_Reduce() calls with the same sendbuf and count */
++   volatile opal_atomic_size_t reduce_same_sendbuf_cnt;
++
++   /* Counts the number of consecutive MPI_Reduce() calls with the same recvbuf and count */
++   volatile opal_atomic_size_t reduce_same_recvbuf_cnt;
++
++} ompi_api_pvars_t;
++
++/* Instantiation of the OMPI API PVARs object */
++extern ompi_api_pvars_t ompi_api_pvars;
++
++typedef opal_atomic_size_t ompi_spc_value_t;
++
++#if defined(MPI_API_PVARS_ENABLE)
++/*(void)opal_atomic_fetch_add_size_t(&ompi_api_pvars.allreduce_same_params_cnt, 1);*/
++/* MPI_Allreduce: Count same params */
++#define MPI_API_PVARS_ALL_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)\
++	static const void *prev_sendbuf = NULL;\
++	static void *prev_recvbuf = NULL;\
++	static int prev_count = 0;\
++	MPI_T_API_PVARS_DEBUG_PRINT("ALLREDUCE: %p %p %d, %lu, %lu\n", sendbuf, recvbuf, count, ompi_api_pvars.allreduce_same_sendbuf_cnt, ompi_api_pvars.allreduce_same_recvbuf_cnt);\
++	if (count == prev_count) {\
++		if (sendbuf == prev_sendbuf)\
++		   ompi_api_pvars.allreduce_same_sendbuf_cnt++;\
++	    if (recvbuf == prev_recvbuf)\
++	       ompi_api_pvars.allreduce_same_recvbuf_cnt++;\
++	}\
++	prev_sendbuf = sendbuf;\
++	prev_recvbuf = recvbuf;\
++	prev_count = count;
++
++
++/* MPI_Reduce: Count same params */
++#define MPI_API_PVARS_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)\
++	static const void *prev_sendbuf = NULL;\
++	static void *prev_recvbuf = NULL;\
++	static int prev_count = 0;\
++	MPI_T_API_PVARS_DEBUG_PRINT("REDUCE: %p %p %d, %lu, %lu\n", sendbuf, recvbuf, count, ompi_api_pvars.reduce_same_sendbuf_cnt, ompi_api_pvars.reduce_same_recvbuf_cnt);\
++	if (count == prev_count) {\
++		if (sendbuf == prev_sendbuf)\
++		   ompi_api_pvars.reduce_same_sendbuf_cnt++;\
++		if (recvbuf == prev_recvbuf)\
++		   ompi_api_pvars.reduce_same_recvbuf_cnt++;\
++	}\
++	prev_sendbuf = sendbuf;\
++	prev_recvbuf = recvbuf;\
++	prev_count = count;
++
++#else
++#define MPI_API_PVARS_ALL_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)
++
++#define MPI_API_PVARS_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)
++#endif /* MPI_API_PVARS_ENABLE */
++
++/* Initialize collecting MPI API PVARs */
++int mpi_api_pvars_init(void);
++
++#endif /* _MPI_API_PVARS_H_ */
+diff --git a/ompi/mpi/c/profile/Makefile.am b/ompi/mpi/c/profile/Makefile.am
+index 5330752..5ec6415 100644
+--- a/ompi/mpi/c/profile/Makefile.am
++++ b/ompi/mpi/c/profile/Makefile.am
+@@ -414,7 +414,8 @@ nodist_libmpi_c_pmpi_la_SOURCES = \
+         pwin_test.c \
+         pwin_unlock.c \
+ 	pwin_unlock_all.c \
+-        pwin_wait.c
++        pwin_wait.c \
++        pmpi_api_pvars.c
+ 
+ if OMPI_ENABLE_MPI1_COMPAT
+ nodist_libmpi_c_pmpi_la_SOURCES += \
+diff --git a/ompi/mpi/c/reduce.c b/ompi/mpi/c/reduce.c
+index 7dcae11..bcd516f 100644
+--- a/ompi/mpi/c/reduce.c
++++ b/ompi/mpi/c/reduce.c
+@@ -33,6 +33,8 @@
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
+ 
++#include "ompi/mpi/c/mpi_api_pvars.h"
++
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+ #pragma weak MPI_Reduce = PMPI_Reduce
+@@ -48,6 +50,9 @@ int MPI_Reduce(const void *sendbuf, void *recvbuf, int count,
+ {
+     int err;
+ 
++    /* Count same params */
++    MPI_API_PVARS_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count);
++
+     SPC_RECORD(OMPI_SPC_REDUCE, 1);
+ 
+     MEMCHECKER(
+-- 
+1.8.3.1
+

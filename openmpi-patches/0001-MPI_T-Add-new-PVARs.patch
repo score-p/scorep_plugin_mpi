@@ -1,0 +1,282 @@
+From 03e5284936c2a010e3a87e170011bb1182e07005 Mon Sep 17 00:00:00 2001
+From: Shuki Zanyovka <shuki.zanyovka@huawei.com>
+Date: Wed, 5 Aug 2020 13:29:06 +0300
+Subject: [PATCH 2/2] MPI_T: Add new PVARs
+
+- Added the following PVARs:
+  - p2p_to_local_rank_cnt:
+      Counts the number of local ranks in P2P communication API
+      function calls.
+  - p2p_to_remote_rank_cnt:
+      Counts the number of remote ranks in P2P communication API
+      function calls.
+  - bcast_last_buffer_ptr_used:
+      Last buffer used by MPI_Bcast() - For preparing histogram.
+  - gatherv_last_send_size_used:
+      Last send size used by MPI_Gatherv(), variadic size -
+      For preparing histogram.
+---
+ ompi/mpi/c/bcast.c         |  4 ++++
+ ompi/mpi/c/gatherv.c       |  4 ++++
+ ompi/mpi/c/irecv.c         |  4 ++++
+ ompi/mpi/c/isend.c         |  4 ++++
+ ompi/mpi/c/mpi_api_pvars.c | 30 ++++++++++++++++++++++++++++
+ ompi/mpi/c/mpi_api_pvars.h | 49 ++++++++++++++++++++++++++++++++++++++++++++++
+ ompi/mpi/c/recv.c          |  4 ++++
+ ompi/mpi/c/send.c          |  4 ++++
+ 8 files changed, 103 insertions(+)
+
+diff --git a/ompi/mpi/c/bcast.c b/ompi/mpi/c/bcast.c
+index 65ecca9..54f9686 100644
+--- a/ompi/mpi/c/bcast.c
++++ b/ompi/mpi/c/bcast.c
+@@ -27,6 +27,7 @@
+ #include "ompi/datatype/ompi_datatype.h"
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -43,6 +44,9 @@ int MPI_Bcast(void *buffer, int count, MPI_Datatype datatype,
+ {
+     int err;
+ 
++    /* Log last buffer used */
++    MPI_API_PVARS_BCAST_LAST_BUFFER_USED(buffer);
++
+     SPC_RECORD(OMPI_SPC_BCAST, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/gatherv.c b/ompi/mpi/c/gatherv.c
+index b439898..c050734 100644
+--- a/ompi/mpi/c/gatherv.c
++++ b/ompi/mpi/c/gatherv.c
+@@ -31,6 +31,7 @@
+ #include "ompi/datatype/ompi_datatype.h"
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -48,6 +49,9 @@ int MPI_Gatherv(const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+ {
+     int i, size, err;
+ 
++    /* Log last buffer send size used */
++    MPI_API_PVARS_GATHERV_LAST_SEND_SIZE_USED(sendcount);
++
+     SPC_RECORD(OMPI_SPC_GATHERV, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/irecv.c b/ompi/mpi/c/irecv.c
+index 924129e..72091b2 100644
+--- a/ompi/mpi/c/irecv.c
++++ b/ompi/mpi/c/irecv.c
+@@ -28,6 +28,7 @@
+ #include "ompi/request/request.h"
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -44,6 +45,9 @@ int MPI_Irecv(void *buf, int count, MPI_Datatype type, int source,
+ {
+     int rc = MPI_SUCCESS;
+ 
++    /* Count P2P local/remote */
++    MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(source, comm);
++
+     SPC_RECORD(OMPI_SPC_IRECV, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/isend.c b/ompi/mpi/c/isend.c
+index 4309a73..4a1eee7 100644
+--- a/ompi/mpi/c/isend.c
++++ b/ompi/mpi/c/isend.c
+@@ -32,6 +32,7 @@
+ #include "ompi/request/request.h"
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -48,6 +49,9 @@ int MPI_Isend(const void *buf, int count, MPI_Datatype type, int dest,
+ {
+     int rc = MPI_SUCCESS;
+ 
++    /* Count P2P local/remote */
++    MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(dest, comm);
++
+     SPC_RECORD(OMPI_SPC_ISEND, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/mpi_api_pvars.c b/ompi/mpi/c/mpi_api_pvars.c
+index d1d09ee..2edd9a4 100644
+--- a/ompi/mpi/c/mpi_api_pvars.c
++++ b/ompi/mpi/c/mpi_api_pvars.c
+@@ -46,6 +46,36 @@ int mpi_api_pvars_init(void)
+                                 MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
+                                 NULL, NULL, NULL, (void *)&ompi_api_pvars.reduce_same_recvbuf_cnt);
+ 
++   ret = mca_base_pvar_register(project, framework, component,
++                                "p2p_to_local_rank_cnt", "Number of times P2P communications API functions called with local process/rank",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.p2p_to_local_rank_cnt);
++
++   ret = mca_base_pvar_register(project, framework, component,
++                                "p2p_to_remote_rank_cnt", "Number of times P2P communications API functions called with remote process/rank",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.p2p_to_remote_rank_cnt);
++
++   ret = mca_base_pvar_register(project, framework, component,
++                                "bcast_last_buffer_ptr_used", "Last buffer used by MPI_Bcast() - For preparing histogram",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.bcast_last_buffer_ptr_used);
++
++
++   ret = mca_base_pvar_register(project, framework, component,
++                                "gatherv_last_send_size_used", "Last send size used by MPI_Gatherv(), variadic size - For preparing histogram",
++                                OPAL_INFO_LVL_3, MCA_BASE_PVAR_CLASS_SIZE,
++                                MCA_BASE_VAR_TYPE_UNSIGNED_LONG, NULL, MCA_BASE_VAR_BIND_NO_OBJECT,
++                                MCA_BASE_PVAR_FLAG_READONLY | MCA_BASE_PVAR_FLAG_CONTINUOUS,
++                                NULL, NULL, NULL, (void *)&ompi_api_pvars.gatherv_last_send_size_used);
++
++
+    return OPAL_SUCCESS;
+ }
+ 
+diff --git a/ompi/mpi/c/mpi_api_pvars.h b/ompi/mpi/c/mpi_api_pvars.h
+index b772f1c..5b3371f 100644
+--- a/ompi/mpi/c/mpi_api_pvars.h
++++ b/ompi/mpi/c/mpi_api_pvars.h
+@@ -9,6 +9,7 @@
+ #include "ompi/runtime/params.h"
+ #include "opal/mca/timer/timer.h"
+ #include "opal/mca/base/mca_base_pvar.h"
++#include "opal/mca/hwloc/hwloc-internal.h"
+ 
+ /* Enables MPI API PVARs */
+ #define MPI_API_PVARS_ENABLE
+@@ -36,6 +37,18 @@ typedef struct ompi_api_pvars_s {
+    /* Counts the number of consecutive MPI_Reduce() calls with the same recvbuf and count */
+    volatile opal_atomic_size_t reduce_same_recvbuf_cnt;
+ 
++   /* Counts the number of local ranks in P2P communication API function calls */
++   volatile opal_atomic_size_t p2p_to_local_rank_cnt;
++
++   /* Counts the number of remote ranks in P2P communication API function calls */
++   volatile opal_atomic_size_t p2p_to_remote_rank_cnt;
++
++   /* Last buffer used by MPI_Bcast() - For preparing histogram */
++   volatile opal_atomic_size_t bcast_last_buffer_ptr_used;
++
++   /* Last send size used by MPI_Gatherv(), variadic size - For preparing histogram */
++   volatile opal_atomic_size_t gatherv_last_send_size_used;
++
+ } ompi_api_pvars_t;
+ 
+ /* Instantiation of the OMPI API PVARs object */
+@@ -78,10 +91,46 @@ typedef opal_atomic_size_t ompi_spc_value_t;
+ 	prev_recvbuf = recvbuf;\
+ 	prev_count = count;
+ 
++/*
++   Count P2P local/remote
++   P2P: MPI_Send(), MPI_Isend(), MPI_Recv(), MPI_Irecv()
++*/
++#define MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(rank_idx, comm) {\
++		struct ompi_proc_t *rank_iter =\
++            (struct ompi_proc_t*)ompi_comm_peer_lookup(comm, rank_idx);\
++        if (OPAL_PROC_ON_LOCAL_SOCKET(rank_iter->super.proc_flags)) {\
++		   ompi_api_pvars.p2p_to_local_rank_cnt++; /* UCG_GROUP_MEMBER_DISTANCE_SOCKET */ \
++		} else if (OPAL_PROC_ON_LOCAL_HOST(rank_iter->super.proc_flags)) {\
++		   ompi_api_pvars.p2p_to_remote_rank_cnt++; /* UCG_GROUP_MEMBER_DISTANCE_HOST */ \
++		} else /* UCG_GROUP_MEMBER_DISTANCE_NET */ \
++		    ompi_api_pvars.p2p_to_remote_rank_cnt++;\
++}
++
++/*
++   MPI_Bcast() buffers used for trace (for histogram)
++*/
++#define MPI_API_PVARS_BCAST_LAST_BUFFER_USED(buffer) \
++		ompi_api_pvars.bcast_last_buffer_ptr_used = (uintptr_t)buffer;
++
++/*
++   MPI_Gatherv() - Used sizes for trace
++*/
++#define MPI_API_PVARS_GATHERV_LAST_SEND_SIZE_USED(size) \
++		ompi_api_pvars.gatherv_last_send_size_used = size;
++
++
+ #else
++
+ #define MPI_API_PVARS_ALL_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)
+ 
+ #define MPI_API_PVARS_REDUCE_SAME_PARAMS_COUNT(sendbuf, recvbuf, count)
++
++MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(source, comm)
++
++#define MPI_API_PVARS_BCAST_LAST_BUFFER_USED(buffer)
++
++#define MPI_API_PVARS_GATHERV_LAST_SEND_SIZE_USED(size)
++
+ #endif /* MPI_API_PVARS_ENABLE */
+ 
+ /* Initialize collecting MPI API PVARs */
+diff --git a/ompi/mpi/c/recv.c b/ompi/mpi/c/recv.c
+index 70de905..51a4847 100644
+--- a/ompi/mpi/c/recv.c
++++ b/ompi/mpi/c/recv.c
+@@ -28,6 +28,7 @@
+ #include "ompi/memchecker.h"
+ #include "ompi/request/request.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -44,6 +45,9 @@ int MPI_Recv(void *buf, int count, MPI_Datatype type, int source,
+ {
+     int rc = MPI_SUCCESS;
+ 
++    /* Count P2P local/remote */
++    MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(source, comm);
++
+     SPC_RECORD(OMPI_SPC_RECV, 1);
+ 
+     MEMCHECKER(
+diff --git a/ompi/mpi/c/send.c b/ompi/mpi/c/send.c
+index 0e57a6f..aa5c465 100644
+--- a/ompi/mpi/c/send.c
++++ b/ompi/mpi/c/send.c
+@@ -31,6 +31,7 @@
+ #include "ompi/datatype/ompi_datatype.h"
+ #include "ompi/memchecker.h"
+ #include "ompi/runtime/ompi_spc.h"
++#include "ompi/mpi/c/mpi_api_pvars.h"
+ 
+ #if OMPI_BUILD_MPI_PROFILING
+ #if OPAL_HAVE_WEAK_SYMBOLS
+@@ -47,6 +48,9 @@ int MPI_Send(const void *buf, int count, MPI_Datatype type, int dest,
+ {
+     int rc = MPI_SUCCESS;
+ 
++    /* Count P2P local/remote */
++    MPI_API_PVARS_P2P_LOCAL_REMOTE_COUNT(dest, comm);
++
+     SPC_RECORD(OMPI_SPC_SEND, 1);
+ 
+     MEMCHECKER(
+-- 
+1.8.3.1
+
