@@ -1,0 +1,39 @@
+From 03b84c12d3d728b9eb6b8dbdfb900b88ab254958 Mon Sep 17 00:00:00 2001
+From: Shuki Zanyovka <shuki.zanyovka@huawei.com>
+Date: Sun, 28 Feb 2021 15:12:35 +0200
+Subject: [PATCH] MPI_T with Score-P plugin: Fix problem of reinitialization
+
+- ompi_mpi_register_params() can't be called more than once.
+---
+ ompi/runtime/ompi_mpi_params.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/ompi/runtime/ompi_mpi_params.c b/ompi/runtime/ompi_mpi_params.c
+index a531c63..5c448b1 100644
+--- a/ompi/runtime/ompi_mpi_params.c
++++ b/ompi/runtime/ompi_mpi_params.c
+@@ -87,6 +87,8 @@ static bool show_enviro_mca_params = false;
+ static bool show_override_mca_params = false;
+ static bool ompi_mpi_oversubscribe = false;
+ 
++static int g_ompi_mpi_register_params_initialized = 0;
++
+ #if OPAL_ENABLE_FT_MPI
+ int ompi_ftmpi_output_handle = 0;
+ bool ompi_ftmpi_enabled = false;
+@@ -97,6 +99,12 @@ int ompi_mpi_register_params(void)
+ {
+     int value;
+ 
++    /* Don't reinitialize (Due to Score-P plugin) */
++    if (g_ompi_mpi_register_params_initialized) {
++       return OMPI_SUCCESS;
++    }
++    g_ompi_mpi_register_params_initialized = 1;
++
+ #if OPAL_ENABLE_FT_MPI
+     mca_base_var_scope_t ftscope = MCA_BASE_VAR_SCOPE_READONLY;
+ #else
+-- 
+1.8.3.1
+
