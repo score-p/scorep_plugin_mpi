@@ -1,4 +1,4 @@
-# scorep_plugin_mpi
+# Score-P MPI plugin
 
 Score-P MPI data acquisition plugin
 
@@ -32,7 +32,7 @@ export LD_LIBRARY_PATH=$SCOREP_PLUGIN_UCX_PATH:$SCOREP_PLUGIN_MPI_PATH:$OMPI_PAT
 export SCOREP_METRIC_PLUGINS="scorep_plugin_mpi"
 export SCOREP_METRIC_SCOREP_PLUGIN_MPI=MPI_T@1
 
-# Disable profilin and enable tracing,
+# Disable profiling and enable tracing,
 
 export SCOREP_ENABLE_PROFILING=false
 export SCOREP_ENABLE_TRACING=true
