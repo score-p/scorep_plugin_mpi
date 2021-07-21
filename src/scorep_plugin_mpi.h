@@ -16,9 +16,16 @@
 #include <thread>
 #include <tuple>
 #include <vector>
+#include <x86intrin.h>
 
 #include <mpi_t_sampling.h>
 #include <plugin_types.h>
+
+/*
+   Enable plugin microbenchmark: Measure mean CPU cycles
+   for getting a single counter value.
+*/
+//#define SCOREP_PLUGIN_MICROBENCHMARK_ENABLE
 
 using namespace scorep::plugin::policy;
 using ThreadId = std::thread::id;
@@ -79,6 +86,11 @@ class scorep_plugin_mpi : public scorep::plugin::base<scorep_plugin_mpi,
         int m_mpi_t_initialized;
 
         size_t m_num_pvars;
+
+#if defined(SCOREP_PLUGIN_MICROBENCHMARK_ENABLE)
+        double m_ticks_cnt_get_total;
+        double m_ticks_cnt_get_num_times;
+#endif
 };
 
 
@@ -116,7 +128,15 @@ template <typename Proxy>
 void
 scorep_plugin_mpi::get_optional_value(int32_t id, Proxy& proxy)
 {
+#if defined(SCOREP_PLUGIN_MICROBENCHMARK_ENABLE)
+    uint64_t ticks_start = __rdtsc();
+#endif
     get_current_value(id, proxy);
+#if defined(SCOREP_PLUGIN_MICROBENCHMARK_ENABLE)
+    /* Update micro benchmark */
+    m_ticks_cnt_get_total += (double)(__rdtsc() - ticks_start);
+    m_ticks_cnt_get_num_times++;
+#endif
 }
 
 #endif /* _SCOREP_PLUGIN_MPI_H_ */
